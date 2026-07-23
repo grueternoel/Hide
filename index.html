@@ -3,7 +3,7 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
     <title>Hide - Archive & Display</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Source+Code+Pro:wght@300&display=swap');
@@ -18,7 +18,7 @@
 
             /* Video Display Variables */
             --screen-width: 100%;
-            --screen-height: 1920px;
+            --screen-height: 100dvh;
             --video-count: 3;
             --video-height: calc(var(--screen-height) / var(--video-count));
         }
@@ -41,9 +41,15 @@
         }
 
         /* View-specific body states */
+        html {
+            width: 100%;
+            min-height: 100%;
+        }
+
         body.video-mode {
             background: #000;
-            height: var(--screen-height);
+            height: 100dvh;
+            min-height: -webkit-fill-available;
             overflow: hidden;
         }
 
@@ -178,8 +184,11 @@
 
         /* --- Video View Styles --- */
         #video-view {
+            position: fixed;
+            inset: 0;
             display: flex;
-            height: 100vh;
+            height: 100dvh;
+            min-height: -webkit-fill-available;
             width: 100vw;
             background: #000;
             overflow: hidden;
@@ -294,7 +303,7 @@
 
 <body>
 
-    <button id="mode-toggle" class="nav-button">Hide Videos Display</button>
+    <button id="mode-toggle" class="nav-button">Hide Video Display</button>
 
     <!-- Archive Section -->
     <div id="archive-view">
@@ -305,10 +314,10 @@
 
     <!-- Video Display Section -->
     <div id="video-view" class="hidden">
-        <div class="full-video-container"><video id="video-1" playsinline></video></div>
-        <div class="full-video-container"><video id="video-2" playsinline></video></div>
-        <div class="full-video-container"><video id="video-3" playsinline></video></div>
-        <div class="full-video-container"><video id="video-4" playsinline></video></div>
+        <div class="full-video-container"><video id="video-1" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><video id="video-2" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><video id="video-3" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><video id="video-4" playsinline muted preload="metadata"></video></div>
     </div>
 
     <script>
@@ -438,17 +447,60 @@
             };
         }
 
+        let galleryMediaObserver = null;
+
         function renderGallery() {
+            if (galleryMediaObserver) {
+                galleryMediaObserver.disconnect();
+            }
+
             gallery.innerHTML = '';
             const numCols = getResponsiveCols();
             const zoomScale = getResponsiveZoomScale();
             const isMobile = window.innerWidth < 768;
-            
-            // Update CSS custom properties
+
             document.documentElement.style.setProperty('--num-cols', numCols);
             document.documentElement.style.setProperty('--zoom-scale', zoomScale);
 
             const numRows = Math.ceil(galleryImageFiles.length / numCols);
+
+            // Videos are loaded only shortly before they enter the viewport.
+            // This avoids downloading/decoding all 30 videos at once on mobile.
+            galleryMediaObserver = new IntersectionObserver((entries) => {
+                entries.forEach(entry => {
+                    const video = entry.target.querySelector('video.media-content');
+                    if (!video) return;
+
+                    if (entry.isIntersecting) {
+                        if (!video.src) {
+                            video.src = video.dataset.src;
+                            video.load();
+                        }
+
+                        if (isMobile && !isVideoMode) {
+                            video.muted = !(soundEnabled && video.dataset.name !== 'hide_67.2');
+                            video.play().catch(() => {
+                                video.muted = true;
+                                video.play().catch(() => {});
+                            });
+                        }
+                    } else {
+                        video.pause();
+                        video.muted = true;
+
+                        // On mobile, release videos far outside the viewport.
+                        // The poster image remains visible while scrolling.
+                        if (isMobile && entry.boundingClientRect.bottom < -window.innerHeight * 1.5) {
+                            video.removeAttribute('src');
+                            video.load();
+                        }
+                    }
+                });
+            }, {
+                root: null,
+                rootMargin: isMobile ? '120% 0px 120% 0px' : '40% 0px 40% 0px',
+                threshold: 0.01
+            });
 
             galleryImageFiles.forEach((imgFileName, index) => {
                 const baseName = imgFileName.replace('.png', '');
@@ -456,78 +508,67 @@
 
                 const colIndex = index % numCols;
                 const rowIndex = Math.floor(index / numCols);
-                
-                const gallerContainer = document.querySelector('.gallery-container');
-                const containerWidth = gallerContainer ? gallerContainer.offsetWidth : window.innerWidth * 0.9;
+
+                const galleryContainer = document.querySelector('.gallery-container');
+                const containerWidth = galleryContainer ? galleryContainer.offsetWidth : window.innerWidth * 0.9;
                 const cellSize = containerWidth / numCols;
                 const baseSize = cellSize * 0.36;
 
                 const shifts = calculateShifts(colIndex, rowIndex, numRows, numCols, baseSize, zoomScale);
 
                 const wrapper = document.createElement('div');
-                wrapper.className = `image-wrapper`;
+                wrapper.className = 'image-wrapper';
                 wrapper.style.setProperty('--shift-x', shifts.shiftX + '%');
                 wrapper.style.setProperty('--shift-y', shifts.shiftY + '%');
 
                 const trigger = document.createElement('div');
                 trigger.className = 'trigger';
-
                 wrapper.appendChild(trigger);
 
-                // Bild rendern: NICHT auf Mobile + hasVideo, aber auf Desktop/Tablet immer
-                if (!hasVideo || window.innerWidth >= 768) {
-                    const img = document.createElement('img');
-                    img.className = 'media-content';
-                    img.src = `hide_web_bilderfinal/${imgFileName}`;
-                    img.alt = baseName;
-                    img.loading = 'lazy';
-                    wrapper.appendChild(img);
-                }
+                // Always keep the still image as a lightweight poster/fallback.
+                const img = document.createElement('img');
+                img.className = 'media-content';
+                img.src = `hide_web_bilderfinal/${imgFileName}`;
+                img.alt = baseName;
+                img.loading = 'lazy';
+                img.decoding = 'async';
+                wrapper.appendChild(img);
 
                 if (hasVideo) {
                     const video = document.createElement('video');
                     video.className = 'media-content';
-                    video.src = `hide_web_videosfinal/${baseName}.mp4`;
+                    video.dataset.src = `hide_web_videosfinal/${baseName}.mp4`;
+                    video.dataset.name = baseName;
                     video.loop = true;
                     video.muted = true;
+                    video.defaultMuted = true;
                     video.playsInline = true;
-                    video.preload = "auto";
-
+                    video.setAttribute('playsinline', '');
+                    video.setAttribute('webkit-playsinline', '');
+                    video.preload = 'none';
+                    video.poster = `hide_web_bilderfinal/${imgFileName}`;
                     wrapper.appendChild(video);
 
-                    if (isMobile) {
-                        // Mobile: Auto-play Videos nach DOM-Einfügung
-                        // Warten bis Video im DOM ist, dann abspielen
-                        requestAnimationFrame(() => {
-                            video.play().catch(() => { });
-                        });
-                        
-                        // Intersection Observer für Audio-Management
-                        const observer = new IntersectionObserver((entries) => {
-                            entries.forEach(entry => {
-                                if (entry.isIntersecting) {
-                                    if (soundEnabled && baseName !== 'hide_67.2') {
-                                        video.muted = false;
-                                    }
-                                } else {
-                                    video.muted = true;
-                                }
-                            });
-                        }, { threshold: 0.5 });
-                        
-                        observer.observe(wrapper);
-                    } else {
-                        // Desktop/Tablet: Hover-basiert
+                    if (!isMobile) {
                         trigger.addEventListener('mouseenter', () => {
-                            if (soundEnabled && baseName !== 'hide_67.2') video.muted = false;
-                            video.play().catch(() => { });
+                            if (!video.src) {
+                                video.src = video.dataset.src;
+                                video.load();
+                            }
+                            video.muted = !(soundEnabled && baseName !== 'hide_67.2');
+                            video.play().catch(() => {});
                         });
+
                         trigger.addEventListener('mouseleave', () => {
                             video.pause();
                             video.currentTime = 0;
+                            video.muted = true;
                         });
                     }
+
+                    galleryMediaObserver.observe(wrapper);
                 }
+
                 gallery.appendChild(wrapper);
             });
         }
@@ -548,6 +589,12 @@
             }, 250);
         });
 
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', () => {
+                if (isVideoMode) calculateRandomHeights();
+            });
+        }
+
         // --- Video Display logic ---
         const folderPath = "hide_web_videosfinal/";
         const displayVideos = [
@@ -559,7 +606,7 @@
 
         // Funktion für zufällige Höhenverteilung (vor Events definieren)
         function calculateRandomHeights() {
-            const viewportHeight = window.innerHeight;
+            const viewportHeight = window.visualViewport?.height || window.innerHeight;
             const isLandscape = window.innerWidth >= window.innerHeight;
             
             if (isLandscape && displayVideos[0] && displayVideos[1]) {
@@ -587,35 +634,50 @@
             return nextSrc;
         }
 
-        function playNewDisplayVideo(videoElement, initialStartTime = null) {
-            const nextSrc = getRandomVideo(videoElement.src);
-            videoElement.src = nextSrc;
+        let displayInitialized = false;
 
-            const onMetadata = () => {
-                if (initialStartTime !== null && videoElement.duration) {
-                    videoElement.currentTime = Math.min(initialStartTime, videoElement.duration - 0.1);
-                }
-                videoElement.removeEventListener('loadedmetadata', onMetadata);
-            };
-
-            videoElement.addEventListener('loadedmetadata', onMetadata);
+        function playNewDisplayVideo(videoElement, initialStartTime = null, retryCount = 0) {
+            const nextSrc = getRandomVideo(videoElement.currentSrc || videoElement.src);
+            videoElement.pause();
+            videoElement.removeAttribute('src');
             videoElement.load();
 
-            videoElement.oncanplay = () => {
+            const onMetadata = () => {
+                if (initialStartTime !== null && Number.isFinite(videoElement.duration)) {
+                    videoElement.currentTime = Math.min(initialStartTime, Math.max(0, videoElement.duration - 0.1));
+                }
+            };
+
+            const startPlayback = () => {
                 const isSpecificallyMuted = nextSrc.includes("hide_67.2.mp4");
                 videoElement.muted = isSpecificallyMuted || !soundEnabled;
-                videoElement.play().catch(e => {
+                videoElement.play().catch(() => {
                     videoElement.muted = true;
-                    videoElement.play();
+                    videoElement.play().catch(() => {});
                 });
             };
+
+            videoElement.addEventListener('loadedmetadata', onMetadata, { once: true });
+            videoElement.addEventListener('canplay', startPlayback, { once: true });
+            videoElement.addEventListener('error', () => {
+                if (retryCount < 2) {
+                    setTimeout(() => playNewDisplayVideo(videoElement, null, retryCount + 1), 400);
+                }
+            }, { once: true });
+
+            videoElement.src = nextSrc;
+            videoElement.load();
         }
 
-        // Initialize Display Videos
-        playNewDisplayVideo(displayVideos[0], 2.66);
-        playNewDisplayVideo(displayVideos[1], 0);
-        playNewDisplayVideo(displayVideos[2], 5.33);
-        playNewDisplayVideo(displayVideos[3], 1.5);
+        function initializeDisplayVideos() {
+            if (displayInitialized) return;
+            displayInitialized = true;
+
+            playNewDisplayVideo(displayVideos[0], 2.66);
+            playNewDisplayVideo(displayVideos[1], 0);
+            playNewDisplayVideo(displayVideos[2], 5.33);
+            playNewDisplayVideo(displayVideos[3], 1.5);
+        }
 
         displayVideos.forEach(video => {
             video.addEventListener('ended', () => {
@@ -638,34 +700,40 @@
                 document.body.classList.add('video-mode');
                 modeToggle.textContent = 'Hide Archive';
 
-                // Reset alle Transforms in Archive-Videos
+                // Pause archive videos without writing inline transform styles.
+                // Inline transform: none caused the desktop hover zoom bug after returning.
                 document.querySelectorAll('.image-wrapper video').forEach(v => {
-                    v.style.transform = 'none';
                     v.pause();
+                    v.muted = true;
+                    v.style.removeProperty('transform');
                 });
 
-                // Berechne zufällige Höhen für Landscape
+                initializeDisplayVideos();
                 calculateRandomHeights();
 
-                // Play display videos
                 displayVideos.forEach(v => {
-                    v.play().catch(() => { });
-                    if (soundEnabled && !v.src.includes("hide_67.2.mp4")) v.muted = false;
+                    if (v.src) {
+                        v.play().catch(() => {});
+                        if (soundEnabled && !v.src.includes("hide_67.2.mp4")) v.muted = false;
+                    }
                 });
             } else {
                 videoView.classList.add('hidden');
                 archiveView.classList.remove('hidden');
                 document.body.classList.remove('video-mode');
-                modeToggle.textContent = 'Hide Videos Display';
+                modeToggle.textContent = 'Hide Video Display';
 
                 // Pause display videos
                 displayVideos.forEach(v => v.pause());
 
-                // Resume mobile gallery videos if on mobile
-                if (window.innerWidth < 768) {
-                    document.querySelectorAll('.image-wrapper video').forEach(v => {
-                        v.play().catch(() => { });
-                    });
+                // Remove any stale inline transform and let the observer resume
+                // only the gallery videos that are near the viewport.
+                document.querySelectorAll('.image-wrapper video').forEach(v => {
+                    v.style.removeProperty('transform');
+                });
+
+                if (galleryMediaObserver) {
+                    galleryMediaObserver.takeRecords();
                 }
             }
         });

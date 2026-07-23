@@ -3,8 +3,8 @@
 
 <head>
     <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Video Display</title>
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <title>Hide Video Display</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link
@@ -13,7 +13,7 @@
     <style>
         :root {
             --screen-width: 100vw;
-            --screen-height: 100vh;
+            --screen-height: 100dvh;
             --video-count: 3;
             --video-height: calc(var(--screen-height) / var(--video-count));
             --video-width: 100%;
@@ -28,7 +28,8 @@
         html,
         body {
             width: 100%;
-            height: 100%;
+            height: 100dvh;
+            min-height: -webkit-fill-available;
             margin: 0;
             background: #000;
             overflow: hidden;
@@ -161,9 +162,9 @@
 
     <a href="index.html" class="nav-button">Hide Archive</a>
 
-    <div class="video-container"><video id="video-1" playsinline></video></div>
-    <div class="video-container"><video id="video-2" playsinline></video></div>
-    <div class="video-container"><video id="video-3" playsinline></video></div>
+    <div class="video-container"><video id="video-1" playsinline muted preload="auto"></video></div>
+    <div class="video-container"><video id="video-2" playsinline muted preload="auto"></video></div>
+    <div class="video-container"><video id="video-3" playsinline muted preload="auto"></video></div>
 
     <script>
         const videoFiles = [
@@ -210,15 +211,19 @@
             videoElement.addEventListener('loadedmetadata', onMetadata);
             videoElement.load();
 
-            videoElement.oncanplay = () => {
+            videoElement.addEventListener('canplay', () => {
                 const isSpecificallyMuted = nextSrc.includes("hide_67.2.mp4");
                 videoElement.muted = isSpecificallyMuted || !soundEnabled;
 
-                videoElement.play().catch(e => {
+                videoElement.play().catch(() => {
                     videoElement.muted = true;
-                    videoElement.play();
+                    videoElement.play().catch(() => {});
                 });
-            };
+            }, { once: true });
+
+            videoElement.addEventListener('error', () => {
+                setTimeout(() => playNewVideo(videoElement, null), 400);
+            }, { once: true });
         }
 
         // Initialize: use specific starting points for the first load
