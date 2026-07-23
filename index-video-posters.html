@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#000000">
     <title>Hide - Archive & Display</title>
     <style>
         @import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&family=Source+Code+Pro:wght@300&display=swap');
@@ -185,11 +186,18 @@
         /* --- Video View Styles --- */
         #video-view {
             position: fixed;
-            inset: 0;
+            top: calc(-1 * env(safe-area-inset-top, 0px));
+            right: 0;
+            bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
+            left: 0;
             display: flex;
-            height: 100dvh;
-            min-height: -webkit-fill-available;
             width: 100vw;
+            height: auto;
+            min-height: calc(
+                100dvh +
+                env(safe-area-inset-top, 0px) +
+                env(safe-area-inset-bottom, 0px)
+            );
             background: #000;
             overflow: hidden;
         }
@@ -206,6 +214,27 @@
             height: 100%;
             object-fit: fill;
             display: block;
+        }
+
+        .full-video-container .video-poster {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: fill;
+            display: block;
+            z-index: 2;
+            pointer-events: none;
+            opacity: 1;
+        }
+
+        .full-video-container video {
+            position: relative;
+            z-index: 1;
+        }
+
+        .full-video-container.is-playing .video-poster {
+            opacity: 0;
         }
 
         /* Portrait: 3 Videos stapeln (vertikal) */
@@ -314,10 +343,10 @@
 
     <!-- Video Display Section -->
     <div id="video-view" class="hidden">
-        <div class="full-video-container"><video id="video-1" playsinline muted preload="auto"></video></div>
-        <div class="full-video-container"><video id="video-2" playsinline muted preload="auto"></video></div>
-        <div class="full-video-container"><video id="video-3" playsinline muted preload="auto"></video></div>
-        <div class="full-video-container"><video id="video-4" playsinline muted preload="metadata"></video></div>
+        <div class="full-video-container"><img class="video-poster" alt=""><video id="video-1" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><img class="video-poster" alt=""><video id="video-2" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><img class="video-poster" alt=""><video id="video-3" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><img class="video-poster" alt=""><video id="video-4" playsinline muted preload="auto"></video></div>
     </div>
 
     <script>
@@ -597,6 +626,26 @@
 
         // --- Video Display logic ---
         const folderPath = "hide_web_videosfinal/";
+        const posterFolderPath = "hide_web_bilderfinal/";
+
+        function getPosterSrc(videoSrc) {
+            const fileName = videoSrc.split('/').pop().replace('.mp4', '.png');
+            return posterFolderPath + fileName;
+        }
+
+        function showVideoPoster(videoElement, videoSrc) {
+            const container = videoElement.parentElement;
+            const poster = container.querySelector('.video-poster');
+            const posterSrc = getPosterSrc(videoSrc);
+
+            container.classList.remove('is-playing');
+            poster.src = posterSrc;
+            videoElement.poster = posterSrc;
+        }
+
+        function hideVideoPoster(videoElement) {
+            videoElement.parentElement.classList.add('is-playing');
+        }
         const displayVideos = [
             document.getElementById('video-1'),
             document.getElementById('video-2'),
@@ -638,19 +687,27 @@
 
         function playNewDisplayVideo(videoElement, initialStartTime = null, retryCount = 0) {
             const nextSrc = getRandomVideo(videoElement.currentSrc || videoElement.src);
+
+            // Show the matching still image immediately, before the MP4 begins loading.
+            showVideoPoster(videoElement, nextSrc);
+
             videoElement.pause();
             videoElement.removeAttribute('src');
             videoElement.load();
 
             const onMetadata = () => {
                 if (initialStartTime !== null && Number.isFinite(videoElement.duration)) {
-                    videoElement.currentTime = Math.min(initialStartTime, Math.max(0, videoElement.duration - 0.1));
+                    videoElement.currentTime = Math.min(
+                        initialStartTime,
+                        Math.max(0, videoElement.duration - 0.1)
+                    );
                 }
             };
 
             const startPlayback = () => {
                 const isSpecificallyMuted = nextSrc.includes("hide_67.2.mp4");
                 videoElement.muted = isSpecificallyMuted || !soundEnabled;
+
                 videoElement.play().catch(() => {
                     videoElement.muted = true;
                     videoElement.play().catch(() => {});
@@ -659,9 +716,28 @@
 
             videoElement.addEventListener('loadedmetadata', onMetadata, { once: true });
             videoElement.addEventListener('canplay', startPlayback, { once: true });
+
+            // Keep the poster visible until the video is genuinely rendering.
+            videoElement.addEventListener('playing', () => {
+                hideVideoPoster(videoElement);
+            }, { once: true });
+
+            videoElement.addEventListener('waiting', () => {
+                showVideoPoster(videoElement, nextSrc);
+            });
+
+            videoElement.addEventListener('stalled', () => {
+                showVideoPoster(videoElement, nextSrc);
+            });
+
             videoElement.addEventListener('error', () => {
+                showVideoPoster(videoElement, nextSrc);
+
                 if (retryCount < 2) {
-                    setTimeout(() => playNewDisplayVideo(videoElement, null, retryCount + 1), 400);
+                    setTimeout(
+                        () => playNewDisplayVideo(videoElement, null, retryCount + 1),
+                        400
+                    );
                 }
             }, { once: true });
 

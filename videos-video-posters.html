@@ -4,6 +4,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+    <meta name="theme-color" content="#000000">
     <title>Hide Video Display</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -39,7 +40,17 @@
         body {
             display: flex;
             flex-direction: column;
-            position: relative;
+            position: fixed;
+            top: calc(-1 * env(safe-area-inset-top, 0px));
+            right: 0;
+            bottom: calc(-1 * env(safe-area-inset-bottom, 0px));
+            left: 0;
+            width: 100vw;
+            min-height: calc(
+                100dvh +
+                env(safe-area-inset-top, 0px) +
+                env(safe-area-inset-bottom, 0px)
+            );
         }
 
         .video-container {
@@ -55,6 +66,27 @@
             height: 100%;
             object-fit: fill;
             display: block;
+        }
+
+        .video-poster {
+            position: absolute;
+            inset: 0;
+            width: 100%;
+            height: 100%;
+            object-fit: fill;
+            display: block;
+            z-index: 2;
+            pointer-events: none;
+            opacity: 1;
+        }
+
+        video {
+            position: relative;
+            z-index: 1;
+        }
+
+        .video-container.is-playing .video-poster {
+            opacity: 0;
         }
 
         .nav-button {
@@ -92,13 +124,13 @@
             body {
                 display: flex;
                 flex-direction: column;
-                position: relative;
+                position: fixed;
             }
             
             .video-container {
                 width: 100%;
                 height: 33.333%;
-                position: relative;
+                position: fixed;
                 background: #000;
                 overflow: hidden;
             }
@@ -109,13 +141,13 @@
             body {
                 display: flex;
                 flex-direction: column;
-                position: relative;
+                position: fixed;
             }
             
             .video-container {
                 width: 100%;
                 height: 33.333%;
-                position: relative;
+                position: fixed;
                 background: #000;
                 overflow: hidden;
             }
@@ -134,13 +166,13 @@
             body {
                 display: flex;
                 flex-direction: column;
-                position: relative;
+                position: fixed;
             }
             
             .video-container {
                 width: 100%;
                 height: 100%;
-                position: relative;
+                position: fixed;
                 background: #000;
                 overflow: hidden;
             }
@@ -162,9 +194,9 @@
 
     <a href="index.html" class="nav-button">Hide Archive</a>
 
-    <div class="video-container"><video id="video-1" playsinline muted preload="auto"></video></div>
-    <div class="video-container"><video id="video-2" playsinline muted preload="auto"></video></div>
-    <div class="video-container"><video id="video-3" playsinline muted preload="auto"></video></div>
+    <div class="video-container"><img class="video-poster" alt=""><video id="video-1" playsinline muted preload="auto"></video></div>
+    <div class="video-container"><img class="video-poster" alt=""><video id="video-2" playsinline muted preload="auto"></video></div>
+    <div class="video-container"><img class="video-poster" alt=""><video id="video-3" playsinline muted preload="auto"></video></div>
 
     <script>
         const videoFiles = [
@@ -179,6 +211,26 @@
         ];
 
         const folderPath = "hide_web_videosfinal/";
+        const posterFolderPath = "hide_web_bilderfinal/";
+
+        function getPosterSrc(videoSrc) {
+            const fileName = videoSrc.split('/').pop().replace('.mp4', '.png');
+            return posterFolderPath + fileName;
+        }
+
+        function showVideoPoster(videoElement, videoSrc) {
+            const container = videoElement.parentElement;
+            const poster = container.querySelector('.video-poster');
+            const posterSrc = getPosterSrc(videoSrc);
+
+            container.classList.remove('is-playing');
+            poster.src = posterSrc;
+            videoElement.poster = posterSrc;
+        }
+
+        function hideVideoPoster(videoElement) {
+            videoElement.parentElement.classList.add('is-playing');
+        }
         const videoElements = [
             document.getElementById('video-1'),
             document.getElementById('video-2'),
@@ -196,20 +248,23 @@
             return nextSrc;
         }
 
-        function playNewVideo(videoElement, initialStartTime = null) {
-            const nextSrc = getRandomVideo(videoElement.src);
-            videoElement.src = nextSrc;
+        function playNewVideo(videoElement, initialStartTime = null, retryCount = 0) {
+            const nextSrc = getRandomVideo(videoElement.currentSrc || videoElement.src);
 
-            const onMetadata = () => {
-                if (initialStartTime !== null && videoElement.duration) {
-                    // Start at requested time, but ensure we don't exceed duration
-                    videoElement.currentTime = Math.min(initialStartTime, videoElement.duration - 0.1);
-                }
-                videoElement.removeEventListener('loadedmetadata', onMetadata);
-            };
+            showVideoPoster(videoElement, nextSrc);
 
-            videoElement.addEventListener('loadedmetadata', onMetadata);
+            videoElement.pause();
+            videoElement.removeAttribute('src');
             videoElement.load();
+
+            videoElement.addEventListener('loadedmetadata', () => {
+                if (initialStartTime !== null && Number.isFinite(videoElement.duration)) {
+                    videoElement.currentTime = Math.min(
+                        initialStartTime,
+                        Math.max(0, videoElement.duration - 0.1)
+                    );
+                }
+            }, { once: true });
 
             videoElement.addEventListener('canplay', () => {
                 const isSpecificallyMuted = nextSrc.includes("hide_67.2.mp4");
@@ -221,9 +276,31 @@
                 });
             }, { once: true });
 
-            videoElement.addEventListener('error', () => {
-                setTimeout(() => playNewVideo(videoElement, null), 400);
+            videoElement.addEventListener('playing', () => {
+                hideVideoPoster(videoElement);
             }, { once: true });
+
+            videoElement.addEventListener('waiting', () => {
+                showVideoPoster(videoElement, nextSrc);
+            });
+
+            videoElement.addEventListener('stalled', () => {
+                showVideoPoster(videoElement, nextSrc);
+            });
+
+            videoElement.addEventListener('error', () => {
+                showVideoPoster(videoElement, nextSrc);
+
+                if (retryCount < 2) {
+                    setTimeout(
+                        () => playNewVideo(videoElement, null, retryCount + 1),
+                        400
+                    );
+                }
+            }, { once: true });
+
+            videoElement.src = nextSrc;
+            videoElement.load();
         }
 
         // Initialize: use specific starting points for the first load
