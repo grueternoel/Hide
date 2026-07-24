@@ -174,23 +174,6 @@
             z-index: 1;
         }
 
-        /* Poster image for archive videos:
-           replicate the exact two-step crop used by the video:
-           square source -> 1280:704 landscape -> square archive crop. */
-        img.media-content.archive-video-poster {
-            transform: scale(1.8181818);
-            transform-origin: center center;
-            clip-path: inset(22.5% 22.5% 22.5% 22.5%);
-        }
-
-        .trigger:hover ~ img.media-content.archive-video-poster {
-            clip-path: none;
-            transform:
-                scale(calc(var(--zoom-scale) * 1.8181818))
-                translate(var(--shift-x, 0), var(--shift-y, 0));
-        }
-
-
         video.media-content {
             opacity: 0;
             z-index: 2;
