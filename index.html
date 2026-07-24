@@ -105,6 +105,28 @@
             display: none !important;
         }
 
+
+        #archive-view,
+        .gallery-container,
+        .image-wrapper {
+            overflow-anchor: none;
+        }
+
+
+        @media (max-width: 767px) {
+            html,
+            body {
+                touch-action: pan-y;
+                scroll-behavior: auto;
+                -webkit-overflow-scrolling: touch;
+            }
+
+            #archive-view,
+            .gallery-container {
+                contain: layout style;
+            }
+        }
+
         /* --- Archive View Styles --- */
         .gallery-container {
             display: grid;
@@ -212,25 +234,50 @@
         .full-video-container video {
             width: 100%;
             height: 100%;
-            object-fit: fill;
+            object-fit: cover;
             display: block;
         }
 
         .full-video-container .video-poster {
             position: absolute;
             inset: 0;
-            width: 100%;
-            height: 100%;
-            object-fit: fill;
-            display: block;
+            overflow: hidden;
             z-index: 2;
             pointer-events: none;
             opacity: 1;
         }
 
+        /*
+         * Two-stage crop:
+         * 1. The square source image is cropped centrally to 1280:704.
+         * 2. That 1280:704 result covers the container exactly like the video.
+         */
+        .full-video-container .video-poster-source {
+            position: absolute;
+            left: 50%;
+            top: 50%;
+            min-width: 100%;
+            min-height: 100%;
+            width: auto;
+            height: auto;
+            aspect-ratio: 1280 / 704;
+            transform: translate(-50%, -50%);
+            overflow: hidden;
+        }
+
+        .full-video-container .video-poster-image {
+            width: 100%;
+            height: 100%;
+            object-fit: cover;
+            object-position: center center;
+            display: block;
+        }
+
         .full-video-container video {
             position: relative;
             z-index: 1;
+            object-fit: cover;
+            object-position: center center;
         }
 
         .full-video-container.is-playing .video-poster {
@@ -343,10 +390,10 @@
 
     <!-- Video Display Section -->
     <div id="video-view" class="hidden">
-        <div class="full-video-container"><img class="video-poster" alt=""><video id="video-1" playsinline muted preload="auto"></video></div>
-        <div class="full-video-container"><img class="video-poster" alt=""><video id="video-2" playsinline muted preload="auto"></video></div>
-        <div class="full-video-container"><img class="video-poster" alt=""><video id="video-3" playsinline muted preload="auto"></video></div>
-        <div class="full-video-container"><img class="video-poster" alt=""><video id="video-4" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><div class="video-poster"><div class="video-poster-source"><img class="video-poster-image" alt=""></div></div><video id="video-1" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><div class="video-poster"><div class="video-poster-source"><img class="video-poster-image" alt=""></div></div><video id="video-2" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><div class="video-poster"><div class="video-poster-source"><img class="video-poster-image" alt=""></div></div><video id="video-3" playsinline muted preload="auto"></video></div>
+        <div class="full-video-container"><div class="video-poster"><div class="video-poster-source"><img class="video-poster-image" alt=""></div></div><video id="video-4" playsinline muted preload="auto"></video></div>
     </div>
 
     <script>
@@ -477,6 +524,37 @@
         }
 
         let galleryMediaObserver = null;
+        let isUserScrolling = false;
+        let mobileScrollTimer = null;
+
+        function playVisibleMobileGalleryVideos() {
+            if (window.innerWidth >= 768 || isVideoMode || isUserScrolling) return;
+
+            document.querySelectorAll('.image-wrapper video[data-in-view="true"]').forEach(video => {
+                if (!video.src) {
+                    video.src = video.dataset.src;
+                    video.load();
+                }
+
+                video.muted = !(soundEnabled && video.dataset.name !== 'hide_67.2');
+                video.play().catch(() => {
+                    video.muted = true;
+                    video.play().catch(() => {});
+                });
+            });
+        }
+
+        window.addEventListener('scroll', () => {
+            if (window.innerWidth >= 768) return;
+
+            isUserScrolling = true;
+            clearTimeout(mobileScrollTimer);
+
+            mobileScrollTimer = setTimeout(() => {
+                isUserScrolling = false;
+                playVisibleMobileGalleryVideos();
+            }, 180);
+        }, { passive: true });
 
         function renderGallery() {
             if (galleryMediaObserver) {
@@ -501,12 +579,14 @@
                     if (!video) return;
 
                     if (entry.isIntersecting) {
+                        video.dataset.inView = 'true';
+
                         if (!video.src) {
                             video.src = video.dataset.src;
                             video.load();
                         }
 
-                        if (isMobile && !isVideoMode) {
+                        if (isMobile && !isVideoMode && !isUserScrolling) {
                             video.muted = !(soundEnabled && video.dataset.name !== 'hide_67.2');
                             video.play().catch(() => {
                                 video.muted = true;
@@ -514,20 +594,14 @@
                             });
                         }
                     } else {
+                        video.dataset.inView = 'false';
                         video.pause();
                         video.muted = true;
-
-                        // On mobile, release videos far outside the viewport.
-                        // The poster image remains visible while scrolling.
-                        if (isMobile && entry.boundingClientRect.bottom < -window.innerHeight * 1.5) {
-                            video.removeAttribute('src');
-                            video.load();
-                        }
                     }
                 });
             }, {
                 root: null,
-                rootMargin: isMobile ? '120% 0px 120% 0px' : '40% 0px 40% 0px',
+                rootMargin: isMobile ? '55% 0px 55% 0px' : '40% 0px 40% 0px',
                 threshold: 0.01
             });
 
@@ -605,17 +679,47 @@
         // Initial render
         renderGallery();
 
-        // Re-render on window resize (with debounce)
+        // Desktop may re-render when its width changes.
+        // Mobile Safari fires resize events while its browser bars move, so mobile
+        // resize events are ignored completely to protect the scroll position.
         let resizeTimeout;
+        let lastViewportWidth = window.innerWidth;
+
         window.addEventListener('resize', () => {
             clearTimeout(resizeTimeout);
+
             resizeTimeout = setTimeout(() => {
-                renderGallery();
-                // Auch zufällige Höhen recalculieren wenn im Video Display
-                if (isVideoMode) {
-                    calculateRandomHeights();
+                if (window.innerWidth < 768) {
+                    if (isVideoMode) calculateRandomHeights();
+                    return;
                 }
+
+                const currentWidth = window.innerWidth;
+                if (Math.abs(currentWidth - lastViewportWidth) > 2) {
+                    lastViewportWidth = currentWidth;
+                    renderGallery();
+                }
+
+                if (isVideoMode) calculateRandomHeights();
             }, 250);
+        });
+
+        window.addEventListener('orientationchange', () => {
+            if (window.innerWidth >= 768) return;
+
+            const savedScrollY = window.scrollY;
+
+            setTimeout(() => {
+                lastViewportWidth = window.innerWidth;
+                renderGallery();
+
+                requestAnimationFrame(() => {
+                    window.scrollTo(0, savedScrollY);
+                    playVisibleMobileGalleryVideos();
+                });
+
+                if (isVideoMode) calculateRandomHeights();
+            }, 450);
         });
 
         if (window.visualViewport) {
@@ -635,7 +739,7 @@
 
         function showVideoPoster(videoElement, videoSrc) {
             const container = videoElement.parentElement;
-            const poster = container.querySelector('.video-poster');
+            const poster = container.querySelector('.video-poster-image');
             const posterSrc = getPosterSrc(videoSrc);
 
             container.classList.remove('is-playing');
